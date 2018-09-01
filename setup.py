@@ -6,7 +6,7 @@ setup(
     author='Hazel Rella',
     author_email='hazelrella11@gmail.com',
     version='0.0.1',
-    scripts=['osu.py'],
+    packages=['osu'],
     install_requires=[
         'aiohttp==3.4.1'
     ]
