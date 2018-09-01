@@ -2,6 +2,10 @@ import aiohttp
 from collections import namedtuple
 import asyncio
 
+from enum import Enum
+
+from functools import reduce
+
 
 class APIError(Exception):
     pass
@@ -10,6 +14,127 @@ class APIError(Exception):
 class ArgumentError(APIError):
     def __init__(self, name, value, condition):
         super().__init__(f'{name} ! {value} : {condition}')
+
+
+class _MaskNumber(Enum):
+    def __new__(cls):
+        if len(cls.__members__) == 0:
+            value = 0
+        else:
+            value = 1 << (len(cls.__members__) - 1)
+        obj = object.__new__(cls)
+        obj._value_ = value
+        return obj
+
+
+class ModValues(Enum):
+    NONE = 0
+    NO_FAIL = 1
+    EASY = 2
+    TOUCH_DEVICE = 4
+    HIDDEN = 8
+    HARD_ROCK = 16
+    SUDDEN_DEATH = 32
+    DOUBLE_TIME = 64
+    RELAX = 128
+    HALF_TIME = 256
+    NIGHTCORE = 512
+    FLASHLIGHT = 1024
+    AUTOPLAY = 2048
+    SPUN_OUT = 4096
+    AUTOPILOT = 8192
+    PERFECT = 16384
+    KEY4 = 32768
+    KEY5 = 65536
+    KEY6 = 131072
+    KEY7 = 262144
+    KEY8 = 524288
+    FADE_IN = 1048576
+    RANDOM = 2097152
+    CINEMA = 4194304
+    TARGET = 8388608
+    KEY9 = 16777216
+    KEY_COOP = 33554432
+    KEY1 = 67108864
+    KEY3 = 134217728
+    KEY2 = 268435456
+    SCORE_V2 = 536870912
+    LAST_MOD = 1073741824
+
+    # Aliases
+    RELAX2 = AUTOPILOT
+
+    NF = NO_FAIL
+    EZ = EASY
+    HD = HIDDEN
+    HR = HARD_ROCK
+    SD = SUDDEN_DEATH
+    DT = DOUBLE_TIME
+    RX = RELAX
+    HT = HALF_TIME
+    NC = NIGHTCORE
+    FL = FLASHLIGHT
+    SO = SPUN_OUT
+    AP = RELAX2
+    PF = PERFECT
+
+    NO_MOD = NONE
+
+
+class Mods:
+    def __init__(self, *modValues):
+        self.value = reduce(lambda a, b: Mods.getValue(a) | Mods.getValue(b), modValues, 0)
+
+    @staticmethod
+    def fromValue(v):
+        m = Mods()
+        m.value = v
+        return m
+
+    def __add__(self, o):
+        if isinstance(o, Mods):
+            return Mods(*self, *o)
+        elif isinstance(o, ModValues):
+            return Mods.fromValue(self.value | o.value)
+        return NotImplemented
+
+    def __sub__(self, o):
+        if isinstance(o, Mods):
+            return reduce(lambda m, v: m - v, o, Mods())
+        elif isinstance(o, ModValues):
+            if o not in self:
+                raise ValueError(f'{str(self)} does not contain {o.name}')
+            return Mods.fromValue(self.value ^ o.value)
+        return NotImplemented
+
+    def __contains__(self, o):
+        if isinstance(o, ModValues):
+            return self.value & o.value > 0
+        return False
+
+    def __str__(self):
+        return f'({", ".join(map(lambda x: x.name, self.modList))})'
+
+    @property
+    def modList(self):
+        if self.value == 0:
+            return [ModValues.NONE]
+
+        mods = []
+        for i in ModValues:
+            if self.value & i.value > 0:
+                mods.append(i)
+
+        return mods
+
+    def __iter__(self):
+        return iter(self.modList)
+
+    @staticmethod
+    def getValue(o):
+        if isinstance(o, ModValues):
+            return o.value
+        return o
 
 
 class Difficulty(namedtuple('Difficulty', ['bpm', 'stars', 'cs', 'od', 'ar', 'hp', 'length', 'drain', 'maxcombo'])):
@@ -72,8 +197,8 @@ class Beatmap:
         self.approved_date = approved_date
         self.last_update = last_update
         self.artist = artist
-        self.beatmap_id = beatmap_id
-        self.beatmapset_id = beatmapset_id
+        self.beatmapID = beatmap_id
+        self.beatmapsetID = beatmapset_id
 
         self.difficulty = self.api.difficultyCls(bpm, difficultyrating, diff_size, diff_overall,
                                                  diff_approach, diff_drain, total_length, hit_length, max_combo)
@@ -217,7 +342,7 @@ class OsuAPI:
 
             return j
 
-    async def getBeatmaps(self, since=None, beatmapset=None, beatmap=None, user=None, userType=None,
+    async def getBeatmaps(self, since=None, beatmapset=None, beatmap=None, user=None, IDMode=None,
                           mode=None, includeConverted=False, bmHash=None, limit=500):
         args = {}
         if since is not None:
@@ -225,11 +350,16 @@ class OsuAPI:
         if beatmapset is not None:
             args['s'] = beatmapset
         if beatmap is not None:
+            if isinstance(beatmap, Beatmap):
+                beatmap = beatmap.beatmapID
             args['b'] = beatmap
         if user is not None:
+            if isinstance(user, User):
+                user = user.ID
+                IDMode = 'id'
             args['u'] = user
-            if userType is not None:
-                args['type'] = userType
+            if IDMode is not None:
+                args['type'] = IDMode
         if mode is not None:
             args['mode'] = mode
 
@@ -253,8 +383,12 @@ class OsuAPI:
 
         return bms
 
-    async def getUser(self, userID, mode=0, IDMode=None, eventDays=1):
-        args = {'u': userID}
+    async def getUser(self, user, mode=0, IDMode=None, eventDays=1):
+        if isinstance(user, User):
+            user = user.ID
+            IDMode = 'id'
+
+        args = {'u': user}
 
         if mode in {0, 1, 2, 3}:
             args['m'] = mode
@@ -276,6 +410,39 @@ class OsuAPI:
 
         return self.userCls(self, **resp[0])
 
+    async def getScores(self, beatmap, user=None, mode=0, mods=None, IDMode=None, limit=50):
+        if isinstance(beatmap, Beatmap):
+            beatmap = beatmap.beatmapID
+        args = {'b': beatmap}
+
+        if user is not None:
+            if isinstance(user, User):
+                user = user.ID
+                IDMode = 'id'
+            args['u'] = user
+            if IDMode is not None:
+                args['type'] = IDMode
+
+        if mode in {0, 1, 2, 3}:
+            args['m'] = mode
+        else:
+            raise ArgumentError('mode', mode, 'Integer[0, 3]')
+
+        if mods is not None:
+            if isinstance(mods, Mods):
+                mods = mods.value
+            args['mods'] = str(mods)
+
+        if limit < 1 or limit > 500 or int(limit) - limit != 0:
+            raise ArgumentError('limit', limit, 'Integer[1-500]')
+
+        args['limit'] = limit
+        print(args)
+
+        scores = await self._APICall('get_scores', args)
+
+        return scores
+
 
 if __name__ == '__main__':
     async def main():
@@ -284,20 +451,13 @@ if __name__ == '__main__':
         async with aiohttp.ClientSession() as sess:
             api = OsuAPI(sess, KEY)
 
-            user = await api.getUser(userID='Dullvampire')
+            user = await api.getUser(user='Dullvampire')
 
-            print(user.username, user.ID)
-            print(user.hitCounts)
-            print(user.playcount)
-            print(user.rankedScore)
-            print(user.totalScore)
-            print(user.level)
-            print(user.rank)
-            print(user.pp)
-            print(user.accuracy)
-            print(user.rankCounts)
-            print(user.country)
-            print(user.countryRank)
+            print(user)
+
+            scores = await api.getScores(917817)
+
+            print(scores)
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
