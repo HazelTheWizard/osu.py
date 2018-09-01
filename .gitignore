@@ -3,3 +3,4 @@ buildtest
 *.pyc
 testingKey.txt
 pyReqs.txt
+tag.py

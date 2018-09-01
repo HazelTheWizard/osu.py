@@ -1,4 +1,13 @@
 from setuptools import setup
+from re import search
+
+with open('osu/__init__.py', 'r') as f:
+    version = search(r"__version__ = '(.*)'", f.read()).group(1)
+
+try:
+    _ = version
+except NameError:
+    raise ValueError('Could not find version')
 
 setup(
     name='osu',
