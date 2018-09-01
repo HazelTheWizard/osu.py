@@ -13,10 +13,12 @@ class ArgumentError(APIError):
 
 
 class Difficulty(namedtuple('Difficulty', ['bpm', 'stars', 'cs', 'od', 'ar', 'hp', 'length', 'drain', 'maxcombo'])):
+    '''More understandable form of representation of difficulty. Meant to be subclassed'''
     pass
 
 
 class Beatmap:
+    '''Represents a beatmap, *not a beatmap set*. Meant to be subclassed'''
     APPROVED_STATUS = {'4': 'Loved',
                        '3': 'Qualified',
                        '2': 'Approved',
@@ -107,6 +109,8 @@ class Beatmap:
 
 
 class Event:
+    '''Represents an "event". Meant to be subclassed'''
+
     def __init__(self, osuAPI,
                  display_html,
                  beatmap_id,
@@ -126,6 +130,8 @@ class Event:
 
 
 class User:
+    '''Represents a user. Meant to be subclassed'''
+
     def __init__(self, osuAPI,
                  user_id,
                  username,
@@ -187,6 +193,8 @@ class Score:
 
 
 class OsuAPI:
+    '''API client to interact with the osu! API. Not meant to be subclassed'''
+
     def __init__(self, session, key, *, beatmapCls=Beatmap, userCls=User, difficultyCls=Difficulty, eventCls=Event):
         self.session = session
         self.key = key
