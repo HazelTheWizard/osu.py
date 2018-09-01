@@ -4,3 +4,4 @@ buildtest
 testingKey.txt
 pyReqs.txt
 tag.py
+.tagged
