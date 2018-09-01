@@ -24,12 +24,15 @@ class Beatmap:
                        '0': 'Pending',
                        '-1': 'WIP',
                        '-2': 'Graveyard'}
+
     GENRE_NAMES = ['Any', 'Unspecified', 'Video Game', 'Anime', 'Rock', 'Pop', 'Other',
                    'Novelty', 'If you see this message Dullvampire#0524', 'Hip Hop', 'Electronic']
+
     LANGUAGE_NAMES = ['Any', 'Other', 'English', 'Japanese',
                       'Chinese', 'Instrumental', 'Korean',
                       'French', 'German', 'Swedish', 'Spanish',
                       'Italian']
+
     MODES = ['Standard', 'Taiko', 'CtB', 'Mania']
 
     def __init__(self, osuAPI,
