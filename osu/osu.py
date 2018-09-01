@@ -277,6 +277,7 @@ if __name__ == '__main__':
             api = OsuAPI(sess, KEY)
 
             user = await api.getUser(userID='Dullvampire')
+
             print(user.username, user.ID)
             print(user.hitCounts)
             print(user.playcount)
