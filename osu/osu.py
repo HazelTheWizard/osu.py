@@ -333,7 +333,7 @@ class User:
                            'a': int(count_rank_a)}
 
         self.country = country
-        self.countryRank = pp_country_rank
+        self.countryRank = int(pp_country_rank)
 
         self.events = [self.osuAPI.eventCls(self.osuAPI, **e) for e in events]
 
@@ -465,8 +465,10 @@ class OsuAPI:
         self.scoreCls = scoreCls
 
         self.rateSemaphore = asyncio.Semaphore(value=rate, loop=self.loop)
+        self.replaySemaphore = asyncio.Semaphore(value=10, loop=self.loop)
 
         self.pastCalls = set()
+        self.replayCalls = set()
 
         self.logger.debug(f'Created API instance with key: {key} rpm: {rate}')
 
@@ -500,6 +502,13 @@ class OsuAPI:
             return 0
 
         return self._nextRateFree
+
+    def removeReplayCall(self, task):
+        self.replayCalls.remove(task)
+
+    async def reserveReplay(self):
+        await asyncio.sleep(10)
+        self.replaySemaphore.release()
 
     async def reserveCall(self):
         t = monotonic()
@@ -702,6 +711,25 @@ class OsuAPI:
 
         return [self.scoreCls(self, **s) for s in await self._APICall('get_user_recent', args)]
 
+    async def getReplay(self, beatmap, user, mode=0):
+        await self.replaySemaphore.acquire()
+
+        task = self.loop.create_task(self.reserveReplay())
+
+        self.pastCalls.add(task)
+
+        task.add_done_callback(self.removeReplayCall)
+
+        if isinstance(user, User):
+            user = user.ID
+
+        if isinstance(beatmap, Beatmap):
+            beatmap = beatmap.beatmapID
+
+        args = {'m': mode, 'b': beatmap, 'u': user}
+
+        return (await self._APICall('get_replay', args))['content']
+
 
 if __name__ == '__main__':
     async def main():
@@ -712,9 +740,15 @@ if __name__ == '__main__':
 
             user = await api.getUser(user='Xithrius')
 
-            scores = await api.getScores(917817)
+            score = (await api.getUserBest(user, limit=1))[0]
 
-            print(await api.getUserRecent(user, limit=1))
+            bm = score.ID
+
+            score = (await api.getScores(score.ID, limit=1))[0]
+
+            print(await api.getReplay(bm, score.userID))
+
+            # print(await api.getUserRecent(user, limit=1))
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
