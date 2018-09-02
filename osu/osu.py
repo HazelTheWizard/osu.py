@@ -6,6 +6,34 @@ from enum import Enum
 
 from functools import reduce
 
+from datetime import datetime
+
+import logging
+
+from sys import stdout
+
+from time import monotonic, time
+
+import json
+
+
+def _toBase62(i):
+    '''Unused in favor of hex'''
+    encoding = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+    if i == 0:
+        return '0'
+
+    if i < 0:
+        raise ValueError('Must be positive')
+
+    indices = []
+    while i > 0:
+        indices.append(i % 62)
+        i //= 62
+
+    return ''.join(map(lambda j: encoding[j], reversed(indices)))
+
 
 class APIError(Exception):
     pass
@@ -314,13 +342,93 @@ class User:
 
 
 class Score:
-    pass
+    def __init__(self, osuAPI,
+                 score_id,
+                 score,
+                 username,
+                 count300,
+                 count100,
+                 count50,
+                 countmiss,
+                 maxcombo,
+                 countkatu,
+                 countgeki,
+                 perfect,
+                 enabled_mods,
+                 user_id,
+                 date,
+                 rank,
+                 pp,
+                 replay_available):
+        self.osuAPI = osuAPI
+
+        self.ID = score_id
+
+        self.score = int(score)
+
+        self.userName = username
+        self.userID = user_id
+
+        self.hitCounts = {'miss': int(countmiss),
+                          '50': int(count50),
+                          '100': int(count100),
+                          '300': int(count300),
+                          'katu': int(countkatu),
+                          'geki': int(countgeki)}
+
+        self.maxCombo = maxcombo
+
+        self.perfect = perfect == '1'
+
+        self.mods = Mods.fromValue(int(enabled_mods))
+
+        self.date = datetime.strptime(date, '%Y-%d-%m %H:%M:%S')
+
+        self.rank = rank
+
+        self.pp = float(pp)
+
+        self.hasReplay = replay_available == '1'
 
 
 class OsuAPI:
     '''API client to interact with the osu! API. Not meant to be subclassed'''
 
-    def __init__(self, session, key, *, beatmapCls=Beatmap, userCls=User, difficultyCls=Difficulty, eventCls=Event):
+    def __init__(self, session, key, *, rate=60, logOutput=None, loggingLevel=logging.INFO,
+                 beatmapCls=Beatmap, userCls=User, difficultyCls=Difficulty, eventCls=Event,
+                 loop=None, limitedTaskDelay=1, callLog=None):
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        self.loop = loop
+
+        self.limitedTaskDelay = limitedTaskDelay
+
+        self.logger = logging.getLogger('osu!api')
+        self.logger.setLevel(logging.DEBUG)
+
+        logFormatter = logging.Formatter('[%(name)s]%(levelname)s : %(asctime)s: %(filename)s:%(lineno)d: %(message)s', '%m-%d %H:%M:%S')
+
+        consoleHandler = logging.StreamHandler(stdout)
+        consoleHandler.setLevel(loggingLevel)
+        consoleHandler.setFormatter(logFormatter)
+        self.logger.addHandler(consoleHandler)
+
+        if logOutput is not None:
+            fileHandler = logging.FileHandler(logOutput, delay=True)
+            fileHandler.setLevel(logging.DEBUG)
+            fileHandler.setFormatter(logFormatter)
+            self.logger.addHandler(fileHandler)
+
+        if rate > 60:
+            self.logger.warning(f'Using rate limiting above 60 is discouraged')
+
+        if rate <= 0:
+            self.logger.warning(f'Invalid rate limiting {rate}, setting to 1')
+            rate = 1
+
+        self.rate = rate
+        self._nextRateFree = 60
+
         self.session = session
         self.key = key
 
@@ -329,18 +437,101 @@ class OsuAPI:
         self.difficultyCls = difficultyCls
         self.eventCls = eventCls
 
+        self.rateSemaphore = asyncio.Semaphore(value=rate, loop=self.loop)
+
+        self.pastCalls = set()
+
+        self.logger.debug(f'Created API instance with key: {key} rpm: {rate}')
+
+        self._callID = -1
+
+        self.callLog = callLog
+
+        if self.callLog is not None:
+            try:
+                with open(self.callLog, 'r') as log:
+                    line = None
+                    for line in log.readlines():
+                        pass
+                    if line is not None:
+                        self._callID = int(line.split('|')[0], 16)
+            except FileNotFoundError:
+                with open(self.callLog, 'w') as log:
+                    log.write('callID|epochTime|path|parameters|responseStatus|timeElapsed\n')
+
+    @property
+    def callID(self):
+        self._callID += 1
+        return self._callID
+
+    def removeCall(self, task):
+        self.pastCalls.remove(task)
+
+    @property
+    def timeUntilFree(self):
+        if not self.rateSemaphore.locked():
+            return 0
+
+        return self._nextRateFree
+
+    async def reserveCall(self):
+        t = monotonic()
+        left = monotonic() - t
+        while left >= 0:
+            await asyncio.sleep(min(left, self.limitedTaskDelay))
+            left = 60 - monotonic() + t
+            self._nextRateFree = min(left, self._nextRateFree)
+        self.rateSemaphore.release()
+
     async def _APICall(self, path, parameters):
-        url = 'https://osu.ppy.sh/api/' + path
+        callID = hex(self.callID)[2:]
+        if self.callLog is not None:
+            with open(self.callLog, 'a') as log:
+                escaped = '\\|'
+                log.write(f'{callID}|{time()}|{path}|{json.dumps(parameters).replace("|", escaped)}')
 
-        parameters.update({'k': self.key})
+        wroteAll = False
 
-        async with self.session.get(url, params=parameters) as resp:
-            j = await resp.json()
+        try:
+            if self.rateSemaphore.locked():
+                self.logger.warning(f'API Call({callID}): reached rate limit, {self.timeUntilFree:.2f} seconds left')
 
-            if 'error' in j:
-                raise APIError(f'error: {path}: {j["error"]}')
+            await self.rateSemaphore.acquire()
 
-            return j
+            timeTaken = monotonic()
+            self.logger.debug(f'API Call({callID}): {path} {parameters}')
+
+            task = self.loop.create_task(self.reserveCall())
+
+            self.pastCalls.add(task)
+
+            task.add_done_callback(self.removeCall)
+
+            url = 'https://osu.ppy.sh/api/' + path
+
+            parameters.update({'k': self.key})
+
+            async with self.session.get(url, params=parameters) as resp:
+                self.logger.debug(f'API Call({callID}): {path} completed with status code {resp.status}')
+                j = await resp.json()
+
+                timeTaken = monotonic() - timeTaken
+
+                with open(self.callLog, 'a') as log:
+                    log.write(f'|{resp.status}|{timeTaken}')
+
+                wroteAll = True
+
+                if 'error' in j:
+                    raise APIError(f'error: {path}: {j["error"]}')
+
+                return j
+        finally:
+            with open(self.callLog, 'a') as log:
+                if wroteAll:
+                    log.write('\n')
+                else:
+                    log.write('||\n')
 
     async def getBeatmaps(self, since=None, beatmapset=None, beatmap=None, user=None, IDMode=None,
                           mode=None, includeConverted=False, bmHash=None, limit=500):
@@ -433,11 +624,10 @@ class OsuAPI:
                 mods = mods.value
             args['mods'] = str(mods)
 
-        if limit < 1 or limit > 500 or int(limit) - limit != 0:
-            raise ArgumentError('limit', limit, 'Integer[1-500]')
+        if limit < 1 or limit > 100 or int(limit) - limit != 0:
+            raise ArgumentError('limit', limit, 'Integer[1-100]')
 
         args['limit'] = limit
-        print(args)
 
         scores = await self._APICall('get_scores', args)
 
@@ -449,15 +639,11 @@ if __name__ == '__main__':
         with open('testingKey.txt', 'r') as f:
             KEY = f.read()
         async with aiohttp.ClientSession() as sess:
-            api = OsuAPI(sess, KEY)
+            api = OsuAPI(sess, KEY, loggingLevel=logging.DEBUG, callLog='calls.csv')
 
             user = await api.getUser(user='Dullvampire')
 
-            print(user)
-
             scores = await api.getScores(917817)
-
-            print(scores)
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
