@@ -44,17 +44,6 @@ class ArgumentError(APIError):
         super().__init__(f'{name} ! {value} : {condition}')
 
 
-class _MaskNumber(Enum):
-    def __new__(cls):
-        if len(cls.__members__) == 0:
-            value = 0
-        else:
-            value = 1 << (len(cls.__members__) - 1)
-        obj = object.__new__(cls)
-        obj._value_ = value
-        return obj
-
-
 class ModValues(Enum):
     NONE = 0
     NO_FAIL = 1
@@ -177,6 +166,8 @@ class Beatmapset:
 
         self.beatmapsetID = beatmapsetID
 
+        self.beatmapSetURL = f'https://osu.ppy.sh/s/{self.beatmapsetID}'
+
         self._beatmaps = None
 
     @property
@@ -186,7 +177,7 @@ class Beatmapset:
 
     async def getBeatmaps(self):
         if self._beatmaps is None:
-            self._beatmaps = await self.osuAPI.getBeatmaps
+            self._beatmaps = await self.osuAPI.getBeatmaps(beatmapset_id=self.beatmapsetID)
 
         return self._beatmaps
 
@@ -258,6 +249,8 @@ class Beatmap:
         self.creatorID = creator_id
         self.source = source
 
+        self._creator = None
+
         self.genre_id = int(genre_id)
         self.genre = self.GENRE_NAMES[self.genre_id]
 
@@ -280,6 +273,21 @@ class Beatmap:
         self.playcount = int(playcount)
         self.passcount = int(passcount)
 
+        self.osuDirectLink = f'osu://dl/{self.beatmapsetID}'
+        self.beatmapURL = f'https://osu.ppy.sh/b/{self.beatmapID}'
+        self.beatmapSetURL = self.beatmapSet.beatmapSetURL
+
+    @property
+    def creator(self):
+        '''Returns the creator of the beatmap in non-async method. **Can return `None`**'''
+        return self._creator
+
+    async def getCreator(self):
+        if self._creator is None:
+            self._creator = self.api.getUser(self.creatorID, IDMode='id')
+
+        return self._creator
+
     def __repr__(self):
         return f'{self.title} ({self.beatmap_id}/{self.beatmapset_id})'
 
@@ -297,12 +305,27 @@ class Event:
 
         self.displayHTML = display_html
 
-        self.beatmap_id = beatmap_id
-        self.beatmapset_id = beatmapset_id
+        self.beatmapID = beatmap_id
+        self.beatmapsetID = beatmapset_id
+
+        self.beatmapSet = self.api.beatmapsetCls(self.api, beatmapset_id)
 
         self.date = date
 
         self.epicFactor = int(epicfactor)
+
+        self._beatmap = None
+
+    @property
+    def beatmap(self):
+        '''Returns the beatmap related to the event in non-async method. **Can return `None`**'''
+        return self._beatmap
+
+    async def getBeatmap(self):
+        if self._beatmap is None:
+            self._beatmap = (await self.osuAPI.getBeatmaps(beatmap_id=self.beatmapID))[0]
+
+        return self._beatmap
 
 
 class User:
@@ -360,6 +383,9 @@ class User:
 
         self.events = [self.osuAPI.eventCls(self.osuAPI, **e) for e in events]
 
+        self.spectateURL = f'osu://spectate/{self.ID}'
+        self.profileURL = f'https://osu.ppy.sh/u/{self.id}'
+
     def __repr__(self):
         return f'{self.username} ({self.ID})'
 
@@ -386,7 +412,7 @@ class Score:
                  beatmap_id=None):
         self.osuAPI = osuAPI
 
-        self.scores = {'score': score_id, 'beatmap': beatmap_id}
+        self.IDs = {'score': score_id, 'beatmap': beatmap_id}
 
         nones = sum(map(lambda a: a is None, self.scores.values()))
 
@@ -434,6 +460,39 @@ class Score:
             self.pp = float(pp)
 
         self.hasReplay = replay_available == '1'
+
+        self._user = None
+
+        self._beatmap = None
+
+    async def getReplay(self):
+        if self.hasReplay:
+            return await self.osuAPI.getReplay(self.beatmapID, self.userID)
+
+    @property
+    def user(self):
+        '''Returns the User who completed the score in non-async method. **Can return `None`**'''
+        return self._user
+
+    async def getUser(self):
+        if self._user is None:
+            self._user = await self.osuAPI.getUser(self.userID, IDMode='id')
+
+        return self._user
+
+    @property
+    def beatmap(self):
+        '''Returns the beatmap related to the event in non-async method. **Can return `None`**'''
+        return self._beatmap
+
+    async def getBeatmap(self):
+        if self.IDs['beatmap'] is None:
+            return None
+
+        if self._beatmap is None:
+            self._beatmap = (await self.osuAPI.getBeatmaps(self.IDs['beatmap']))[0]
+
+        return self._beatmap
 
     def __repr__(self):
         return f'Score({self.score}, {self.idType})'
