@@ -852,26 +852,3 @@ class OsuAPI:
         args = {'m': mode, 'b': beatmap, 'u': user}
 
         return (await self._APICall('get_replay', args))['content']
-
-
-if __name__ == '__main__':
-    async def main():
-        with open('testingKey.txt', 'r') as f:
-            KEY = f.read()
-        async with aiohttp.ClientSession() as sess:
-            api = OsuAPI(sess, KEY, loggingLevel=logging.DEBUG, callLog='calls.csv')
-
-            user = await api.getUser(user='Xithrius')
-
-            score = (await api.getUserBest(user, limit=1))[0]
-
-            bm = score.ID
-
-            score = (await api.getScores(score.ID, limit=1))[0]
-
-            print(await api.getReplay(bm, score.userID))
-
-            # print(await api.getUserRecent(user, limit=1))
-
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
