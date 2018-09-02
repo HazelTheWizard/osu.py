@@ -343,9 +343,7 @@ class User:
 
 class Score:
     def __init__(self, osuAPI,
-                 score_id,
                  score,
-                 username,
                  count300,
                  count100,
                  count50,
@@ -358,11 +356,33 @@ class Score:
                  user_id,
                  date,
                  rank,
-                 pp,
-                 replay_available):
+                 pp=None,
+                 replay_available=None,
+                 username=None,
+                 score_id=None,
+                 beatmap_id=None):
         self.osuAPI = osuAPI
 
-        self.ID = score_id
+        self.scores = {'score': score_id, 'beatmap': beatmap_id}
+
+        nones = sum(map(lambda a: a is None, self.scores.values()))
+
+        if nones == 0:
+            self.idType = 'none'
+        elif nones == 1:
+            if self.scores['score'] is not None:
+                self.idType = 'score'
+            else:
+                self.idType = 'beatmap'
+        elif nones == 2:
+            self.idType = 'both'
+
+        if score_id is not None:
+            self.ID = score_id
+            self.IDType = 'score'
+        if beatmap_id is not None:
+            self.ID = beatmap_id
+            self.IDType = 'beatmap'
 
         self.score = int(score)
 
@@ -382,13 +402,18 @@ class Score:
 
         self.mods = Mods.fromValue(int(enabled_mods))
 
-        self.date = datetime.strptime(date, '%Y-%d-%m %H:%M:%S')
+        self.date = datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
 
         self.rank = rank
 
-        self.pp = float(pp)
+        self.pp = pp
+        if type(pp) == str:
+            self.pp = float(pp)
 
         self.hasReplay = replay_available == '1'
+
+    def __repr__(self):
+        return f'Score({self.score}, {self.idType})'
 
 
 class OsuAPI:
@@ -396,6 +421,7 @@ class OsuAPI:
 
     def __init__(self, session, key, *, rate=60, logOutput=None, loggingLevel=logging.INFO,
                  beatmapCls=Beatmap, userCls=User, difficultyCls=Difficulty, eventCls=Event,
+                 scoreCls=Score,
                  loop=None, limitedTaskDelay=1, callLog=None):
         if loop is None:
             loop = asyncio.get_event_loop()
@@ -436,6 +462,7 @@ class OsuAPI:
         self.userCls = userCls
         self.difficultyCls = difficultyCls
         self.eventCls = eventCls
+        self.scoreCls = scoreCls
 
         self.rateSemaphore = asyncio.Semaphore(value=rate, loop=self.loop)
 
@@ -629,9 +656,51 @@ class OsuAPI:
 
         args['limit'] = limit
 
-        scores = await self._APICall('get_scores', args)
+        return [self.scoreCls(self, **s) for s in await self._APICall('get_scores', args)]
 
-        return scores
+    async def getUserBest(self, user, mode=0, limit=10, IDMode=None):
+        if isinstance(user, User):
+            user = user.ID
+            IDMode = 'id'
+
+        args = {'u': user}
+
+        if mode in {0, 1, 2, 3}:
+            args['m'] = mode
+        else:
+            raise ArgumentError('mode', mode, 'Integer[0, 3]')
+
+        if limit < 1 or limit > 100 or int(limit) - limit != 0:
+            raise ArgumentError('limit', limit, 'Integer[1-100]')
+
+        args['limit'] = limit
+
+        if IDMode is not None:
+            args['type'] = IDMode
+
+        return [self.scoreCls(self, **s) for s in await self._APICall('get_user_best', args)]
+
+    async def getUserRecent(self, user, mode=0, limit=10, IDMode=None):
+        if isinstance(user, User):
+            user = user.ID
+            IDMode = 'id'
+
+        args = {'u': user}
+
+        if mode in {0, 1, 2, 3}:
+            args['m'] = mode
+        else:
+            raise ArgumentError('mode', mode, 'Integer[0, 3]')
+
+        if limit < 1 or limit > 50 or int(limit) - limit != 0:
+            raise ArgumentError('limit', limit, 'Integer[1-100]')
+
+        args['limit'] = limit
+
+        if IDMode is not None:
+            args['type'] = IDMode
+
+        return [self.scoreCls(self, **s) for s in await self._APICall('get_user_recent', args)]
 
 
 if __name__ == '__main__':
@@ -641,9 +710,11 @@ if __name__ == '__main__':
         async with aiohttp.ClientSession() as sess:
             api = OsuAPI(sess, KEY, loggingLevel=logging.DEBUG, callLog='calls.csv')
 
-            user = await api.getUser(user='Dullvampire')
+            user = await api.getUser(user='Xithrius')
 
             scores = await api.getScores(917817)
+
+            print(await api.getUserRecent(user, limit=1))
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
