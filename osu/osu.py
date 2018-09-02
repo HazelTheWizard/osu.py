@@ -172,10 +172,10 @@ class Difficulty(namedtuple('Difficulty', ['bpm', 'stars', 'cs', 'od', 'ar', 'hp
 
 class Beatmapset:
     def __init__(self, osuAPI,
-                 mapsetID):
+                 beatmapsetID):
         self.osuAPI = osuAPI
 
-        self.mapsetID = mapsetID
+        self.beatmapsetID = beatmapsetID
 
         self._beatmaps = None
 
@@ -241,6 +241,8 @@ class Beatmap:
                  passcount,
                  max_combo):
         self.api = osuAPI
+
+        self.beatmapSet = self.api.beatmapsetCls(self.api, beatmapset_id)
 
         self.approved = self.APPROVED_STATUS[approved]
         self.approved_date = approved_date
@@ -597,6 +599,8 @@ class OsuAPI:
         if since is not None:
             args['since'] = since.strftime('%Y-%m-%d')
         if beatmapset is not None:
+            if isinstance(beatmapset, Beatmapset):
+                beatmapset = beatmapset.beatmapsetID
             args['s'] = beatmapset
         if beatmap is not None:
             if isinstance(beatmap, Beatmap):
