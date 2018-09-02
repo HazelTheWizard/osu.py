@@ -170,6 +170,27 @@ class Difficulty(namedtuple('Difficulty', ['bpm', 'stars', 'cs', 'od', 'ar', 'hp
     pass
 
 
+class Beatmapset:
+    def __init__(self, osuAPI,
+                 mapsetID):
+        self.osuAPI = osuAPI
+
+        self.mapsetID = mapsetID
+
+        self._beatmaps = None
+
+    @property
+    def beatmaps(self):
+        '''Returns the list of beatmaps in non-async method. **Can return `None`**'''
+        return self._beatmaps
+
+    async def getBeatmaps(self):
+        if self._beatmaps is None:
+            self._beatmaps = await self.osuAPI.getBeatmaps
+
+        return self._beatmaps
+
+
 class Beatmap:
     '''Represents a beatmap, *not a beatmap set*. Meant to be subclassed'''
     APPROVED_STATUS = {'4': 'Loved',
@@ -421,7 +442,7 @@ class OsuAPI:
 
     def __init__(self, session, key, *, rate=60, logOutput=None, loggingLevel=logging.INFO,
                  beatmapCls=Beatmap, userCls=User, difficultyCls=Difficulty, eventCls=Event,
-                 scoreCls=Score,
+                 scoreCls=Score, beatmapsetCls=Beatmapset,
                  loop=None, limitedTaskDelay=1, callLog=None):
         if loop is None:
             loop = asyncio.get_event_loop()
@@ -463,6 +484,7 @@ class OsuAPI:
         self.difficultyCls = difficultyCls
         self.eventCls = eventCls
         self.scoreCls = scoreCls
+        self.beatmapsetCls = beatmapsetCls
 
         self.rateSemaphore = asyncio.Semaphore(value=rate, loop=self.loop)
         self.replaySemaphore = asyncio.Semaphore(value=10, loop=self.loop)
