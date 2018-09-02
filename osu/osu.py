@@ -170,6 +170,27 @@ class Difficulty(namedtuple('Difficulty', ['bpm', 'stars', 'cs', 'od', 'ar', 'hp
     pass
 
 
+class Beatmapset:
+    def __init__(self, osuAPI,
+                 mapsetID):
+        self.osuAPI = osuAPI
+
+        self.mapsetID = mapsetID
+
+        self._beatmaps = None
+
+    @property
+    def beatmaps(self):
+        '''Returns the list of beatmaps in non-async method. **Can return `None`**'''
+        return self._beatmaps
+
+    async def getBeatmaps(self):
+        if self._beatmaps is None:
+            self._beatmaps = await self.osuAPI.getBeatmaps
+
+        return self._beatmaps
+
+
 class Beatmap:
     '''Represents a beatmap, *not a beatmap set*. Meant to be subclassed'''
     APPROVED_STATUS = {'4': 'Loved',
@@ -333,7 +354,7 @@ class User:
                            'a': int(count_rank_a)}
 
         self.country = country
-        self.countryRank = pp_country_rank
+        self.countryRank = int(pp_country_rank)
 
         self.events = [self.osuAPI.eventCls(self.osuAPI, **e) for e in events]
 
@@ -421,7 +442,7 @@ class OsuAPI:
 
     def __init__(self, session, key, *, rate=60, logOutput=None, loggingLevel=logging.INFO,
                  beatmapCls=Beatmap, userCls=User, difficultyCls=Difficulty, eventCls=Event,
-                 scoreCls=Score,
+                 scoreCls=Score, beatmapsetCls=Beatmapset,
                  loop=None, limitedTaskDelay=1, callLog=None):
         if loop is None:
             loop = asyncio.get_event_loop()
@@ -463,10 +484,13 @@ class OsuAPI:
         self.difficultyCls = difficultyCls
         self.eventCls = eventCls
         self.scoreCls = scoreCls
+        self.beatmapsetCls = beatmapsetCls
 
         self.rateSemaphore = asyncio.Semaphore(value=rate, loop=self.loop)
+        self.replaySemaphore = asyncio.Semaphore(value=10, loop=self.loop)
 
         self.pastCalls = set()
+        self.replayCalls = set()
 
         self.logger.debug(f'Created API instance with key: {key} rpm: {rate}')
 
@@ -500,6 +524,13 @@ class OsuAPI:
             return 0
 
         return self._nextRateFree
+
+    def removeReplayCall(self, task):
+        self.replayCalls.remove(task)
+
+    async def reserveReplay(self):
+        await asyncio.sleep(10)
+        self.replaySemaphore.release()
 
     async def reserveCall(self):
         t = monotonic()
@@ -702,6 +733,25 @@ class OsuAPI:
 
         return [self.scoreCls(self, **s) for s in await self._APICall('get_user_recent', args)]
 
+    async def getReplay(self, beatmap, user, mode=0):
+        await self.replaySemaphore.acquire()
+
+        task = self.loop.create_task(self.reserveReplay())
+
+        self.pastCalls.add(task)
+
+        task.add_done_callback(self.removeReplayCall)
+
+        if isinstance(user, User):
+            user = user.ID
+
+        if isinstance(beatmap, Beatmap):
+            beatmap = beatmap.beatmapID
+
+        args = {'m': mode, 'b': beatmap, 'u': user}
+
+        return (await self._APICall('get_replay', args))['content']
+
 
 if __name__ == '__main__':
     async def main():
@@ -712,9 +762,15 @@ if __name__ == '__main__':
 
             user = await api.getUser(user='Xithrius')
 
-            scores = await api.getScores(917817)
+            score = (await api.getUserBest(user, limit=1))[0]
 
-            print(await api.getUserRecent(user, limit=1))
+            bm = score.ID
+
+            score = (await api.getScores(score.ID, limit=1))[0]
+
+            print(await api.getReplay(bm, score.userID))
+
+            # print(await api.getUserRecent(user, limit=1))
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
