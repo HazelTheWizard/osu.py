@@ -98,6 +98,52 @@ class ModValues(Enum):
     NO_MOD = NONE
 
 
+class Modes(Enum):
+    standard = 0
+    taiko = 1
+    ctb = 2
+    mania = 3
+
+
+class LanguageNames(Enum):
+    Any = 0
+    Other = 1
+    Enligh = 2
+    Japanese = 3
+    Chinese = 4
+    Instrumental = 5
+    Korean = 6
+    French = 7
+    German = 8
+    Swedish = 9
+    Spanish = 10
+    Italian = 11
+
+
+class Genres(Enum):
+    Any = 0
+    Unspecified = 1
+    VideoGame = 2
+    Anime = 3
+    Rock = 4
+    Pop = 5
+    Other = 6
+    Novelty = 7
+    ERROR_CONTACT_DEVELOPER = 8
+    HipHop = 9
+    Electronic = 10
+
+
+class ApprovedStatus(Enum):
+    Loved = 4
+    Qualified = 3
+    Approved = 2
+    Ranked = 1
+    Pending = 0
+    WIP = -1
+    Graveyard = -2
+
+
 class Mods:
     def __init__(self, *modValues):
         self.value = reduce(lambda a, b: Mods.getValue(a) | Mods.getValue(b), modValues, 0)
@@ -184,23 +230,23 @@ class Beatmapset:
 
 class Beatmap:
     '''Represents a beatmap, *not a beatmap set*. Meant to be subclassed'''
-    APPROVED_STATUS = {'4': 'Loved',
-                       '3': 'Qualified',
-                       '2': 'Approved',
-                       '1': 'Ranked',
-                       '0': 'Pending',
-                       '-1': 'WIP',
-                       '-2': 'Graveyard'}
-
-    GENRE_NAMES = ['Any', 'Unspecified', 'Video Game', 'Anime', 'Rock', 'Pop', 'Other',
-                   'Novelty', 'If you see this message Dullvampire#0524', 'Hip Hop', 'Electronic']
-
-    LANGUAGE_NAMES = ['Any', 'Other', 'English', 'Japanese',
-                      'Chinese', 'Instrumental', 'Korean',
-                      'French', 'German', 'Swedish', 'Spanish',
-                      'Italian']
-
-    MODES = ['Standard', 'Taiko', 'CtB', 'Mania']
+    # APPROVED_STATUS = {'4': 'Loved',
+    #                    '3': 'Qualified',
+    #                    '2': 'Approved',
+    #                    '1': 'Ranked',
+    #                    '0': 'Pending',
+    #                    '-1': 'WIP',
+    #                    '-2': 'Graveyard'}
+    #
+    # GENRE_NAMES = ['Any', 'Unspecified', 'Video Game', 'Anime', 'Rock', 'Pop', 'Other',
+    #                'Novelty', 'If you see this message Dullvampire#0524', 'Hip Hop', 'Electronic']
+    #
+    # LANGUAGE_NAMES = ['Any', 'Other', 'English', 'Japanese',
+    #                   'Chinese', 'Instrumental', 'Korean',
+    #                   'French', 'German', 'Swedish', 'Spanish',
+    #                   'Italian']
+    #
+    # MODES = ['Standard', 'Taiko', 'CtB', 'Mania']
 
     def __init__(self, osuAPI,
                  approved,
@@ -235,7 +281,7 @@ class Beatmap:
 
         self.beatmapSet = self.api.beatmapsetCls(self.api, beatmapset_id)
 
-        self.approved = self.APPROVED_STATUS[approved]
+        self.approved = ApprovedStatus(approved)
         self.approved_date = approved_date
         self.last_update = last_update
         self.artist = artist
@@ -252,10 +298,10 @@ class Beatmap:
         self._creator = None
 
         self.genre_id = int(genre_id)
-        self.genre = self.GENRE_NAMES[self.genre_id]
+        self.genre = Genres(self.genre_id)
 
         self.language_id = int(language_id)
-        self.language = self.LANGUAGE_NAMES[self.language_id]
+        self.language = LanguageNames(self.language_id)
 
         self.title = title
 
@@ -264,7 +310,7 @@ class Beatmap:
         self._md5 = file_md5
 
         self.mode_id = int(mode)
-        self.mode = self.MODES[int(mode)]
+        self.mode = Modes(int(mode))
 
         self.tags = list(tags.split(' '))
 
@@ -673,7 +719,7 @@ class OsuAPI:
             if IDMode is not None:
                 args['type'] = IDMode
         if mode is not None:
-            args['mode'] = mode
+            args['m'] = mode.value
 
             if str(mode) != '0':
                 if includeConverted:
@@ -695,17 +741,15 @@ class OsuAPI:
 
         return bms
 
-    async def getUser(self, user, mode=0, IDMode=None, eventDays=1):
+    async def getUser(self, user, mode=None, IDMode=None, eventDays=1):
         if isinstance(user, User):
             user = user.ID
             IDMode = 'id'
 
         args = {'u': user}
 
-        if mode in {0, 1, 2, 3}:
-            args['m'] = mode
-        else:
-            raise ArgumentError('mode', mode, 'Integer[0, 3]')
+        if mode is not None:
+            args['m'] = mode.value
 
         if IDMode in {'string', 'id', None}:
             if IDMode is not None:
@@ -735,10 +779,8 @@ class OsuAPI:
             if IDMode is not None:
                 args['type'] = IDMode
 
-        if mode in {0, 1, 2, 3}:
-            args['m'] = mode
-        else:
-            raise ArgumentError('mode', mode, 'Integer[0, 3]')
+        if mode is not None:
+            args['m'] = mode.value
 
         if mods is not None:
             if isinstance(mods, Mods):
@@ -759,10 +801,8 @@ class OsuAPI:
 
         args = {'u': user}
 
-        if mode in {0, 1, 2, 3}:
-            args['m'] = mode
-        else:
-            raise ArgumentError('mode', mode, 'Integer[0, 3]')
+        if mode is not None:
+            args['m'] = mode.value
 
         if limit < 1 or limit > 100 or int(limit) - limit != 0:
             raise ArgumentError('limit', limit, 'Integer[1-100]')
@@ -781,10 +821,8 @@ class OsuAPI:
 
         args = {'u': user}
 
-        if mode in {0, 1, 2, 3}:
-            args['m'] = mode
-        else:
-            raise ArgumentError('mode', mode, 'Integer[0, 3]')
+        if mode is not None:
+            args['m'] = mode.value
 
         if limit < 1 or limit > 50 or int(limit) - limit != 0:
             raise ArgumentError('limit', limit, 'Integer[1-100]')
