@@ -5,7 +5,7 @@ osu.py is a high level API wrapper for Python with focus on subclassing data cla
 ### Installation
 
 #### Using pip
-`pip install git+git://github.com/HazelTheWizard/osu.py`
+`pip install git+git://github.com/HazelTheWitch/osu.py`
 #### Manual install
 Clone the repository.  
 In a prompt in the local folder:
