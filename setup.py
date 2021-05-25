@@ -17,6 +17,6 @@ setup(
     version='0.0.1',
     packages=['osu'],
     install_requires=[
-        'aiohttp==3.4.1'
+        'aiohttp==3.7.4'
     ]
 )
